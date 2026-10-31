@@ -1,120 +1,127 @@
-![PyPI version](https://img.shields.io/pypi/v/<project-name>)
+![PyPI version](https://img.shields.io/pypi/v/pytest-fail2skip)
 ![Python](https://img.shields.io/badge/python->=3.12-blue)
 ![Development Status](https://img.shields.io/badge/status-stable-green)
 ![Maintenance](https://img.shields.io/maintenance/yes/2026)
-![PyPI](https://img.shields.io/pypi/dm/<project-name>)
-![License](https://img.shields.io/pypi/l/<project-name>)
+![PyPI](https://img.shields.io/pypi/dm/pytest-fail2skip)
+![License](https://img.shields.io/pypi/l/pytest-fail2skip)
 
 ---
 
-# 🧱 Dev Template Repository
-A comprehensive, production-ready template repository for initializing new development projects with consistent tooling, editor settings, GitHub workflows, and best practices. This template serves as a **baseline setup** for modern development workflows, reducing setup overhead and promoting standardization across all your codebases.
-
-## 🎯 Overview
-This template provides a solid foundation for Python projects with:
-- **Pre-configured development environment** with VS Code settings and extensions
-- **Automated CI/CD pipelines** using GitHub Actions
-- **Code quality enforcement** with linting, formatting, and testing
-- **Professional project structure** with proper documentation and metadata
-- **Team collaboration tools** including PR templates and code ownership
+# 💡 pytest-fail2skip
+A pytest plugin that reports failures of marked tests as **skipped**, so known failures don't block your CI gate.
+The failure stays visible by default: conversion only happens when you opt in with `--fail2skip`.
 
 ---
 
-## 📁 What's Included
-
-### 🔧 Development Environment (`.vscode/`)
-- **`settings.json`**: Editor defaults (format on save, lint integration, tab size, Python interpreter)
-- **`extensions.json`**: Recommended extensions for Python development and team consistency
-- **`keybindings.json`**: Custom keyboard shortcuts for improved productivity
-- **`launch.json`**: Debugging configurations for Python applications
-
-### ⚙️ GitHub Configuration (`.github/`)
-- **Workflows**: Automated CI/CD pipelines for testing, linting, and publishing
-  - `publish_to_pypi.yml`: Automated PyPI package publishing
-- **`CODEOWNERS`**: Define default code reviewers per folder/path
-- **Issue templates**: Standardized bug reports and feature requests
-- **Pull request template**: Enforce contribution guidelines and checklists
-
-### 🧹 Code Quality & Style
-- **Python-specific configurations**:
-  - `pyproject.toml`: Core dependencies and development tools
-  - `MANIFEST.in`: Package distribution configuration
-  - `env.template`: Environment variables template
-- **`.gitignore`**: Preconfigured for Python, IDEs, and common tools
-- **`.cursor/`**: Cursor IDE specific configurations and instructions
-
-### 📄 Project Metadata
-- **`README.md`**: Comprehensive project documentation
-- **`LICENSE`**: MIT license for open-source projects
-- **`CHANGELOG.md`**: Version tracking and release notes
+## 📦 Installation
+```bash
+uv add pytest-fail2skip
+```
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Features
+  - ✅ **Opt-in conversion** — failures are converted only when `--fail2skip` is passed; locally you still see the real failure
+  - ✅ **Targeted with `raises=`** — convert only the expected exception; a new, different failure still fails the run
+  - ✅ **Reason in the output** — shown in the `-rs` summary and exposed as the `fail2skip_reason` user property (JUnit XML, custom reporters)
+  - ✅ **Strict-markers safe** — the marker is always registered, with or without the flag
+  - ✅ **Standalone** — changes only pytest's own report; works with any reporting plugin
 
-### 1. Create New Repository
-Click **"Use this template"** on GitHub to create a new repository based on this template.
+---
 
-### 2. Clone and Setup
-```bash
-# Clone your new repository
-git clone https://github.com/your-username/your-new-repo.git
-cd your-new-repo
+## 🛠️ How to Use
+1. Mark the known-failing test:
+   ```python
+   import pytest
 
-# Create virtual environment
-uv venv
-source .venv/bin/activate   # On Windows: .venv\Scripts\activate
+   @pytest.mark.fail2skip(reason="BUG-123: flaky upstream service", raises=ConnectionError)
+   def test_sync_with_upstream():
+       ...
+   ```
+2. Run normally to see the real result: `pytest`
+3. In CI, opt in to the conversion: `pytest --fail2skip`
 
-# Install dependencies
-uv sync --group dev # or uv pip install -r requirements.txt
+---
 
-# Copy environment template
-cp env.template .env
-# Edit .env with your specific configuration
+## ⚙️ Marker Reference
+`@pytest.mark.fail2skip(reason=None, raises=None)`
+
+| Argument | Description |
+|---|---|
+| `reason` | Shown as `fail2skip: <reason>`. Can also be passed positionally. Defaults to `no reason given`. |
+| `raises` | An exception type or tuple of types. When set, only these failures are converted. |
+
+Behavior when `--fail2skip` is set:
+
+| Test result | Reported as |
+|---|---|
+| Fails in the test body (and matches `raises`, if given) | skipped |
+| Fails with an exception not in `raises` | failed |
+| Passes | passed |
+| Errors in setup/teardown (e.g. a broken fixture) | error — not converted |
+
+The marker can also be applied to a class, or to a whole module with `pytestmark`.
+
+---
+
+## 🤔 fail2skip vs. `xfail`
+`@pytest.mark.xfail` is close, but differs in two ways that matter for a release gate:
+
+- **Default direction** — `xfail` hides the failure unless you pass `--runxfail`. `fail2skip` shows it unless you pass `--fail2skip`, so forgetting the flag fails loudly instead of silently.
+- **Passing tests** — a passing `xfail` test is reported as XPASS; a passing `fail2skip` test is simply passed.
+
+If neither matters to you, `xfail(raises=..., strict=False)` is the built-in alternative.
+
+---
+
+## ▶️ Usage Examples
+### Convert only expected exceptions
+Pass a single exception type:
+```python
+import pytest
+
+@pytest.mark.fail2skip(reason="BUG-123: upstream service is unstable", raises=ConnectionError)
+def test_sync_with_upstream():
+    ...
 ```
 
-### 3. Customize for Your Project
-1. **Update project metadata**:
-   - Edit `README.md` with your project details
-   - Update `pyproject.toml` with your specific dependencies
-   - Modify `MANIFEST.in` for package distribution
+Or a tuple, to convert any of several known failures:
+```python
+import pytest
 
-2. **Configure environment**:
-   - Edit `.env` file with your environment variables
-   - Update VS Code settings in `.vscode/settings.json` if needed
+@pytest.mark.fail2skip(
+    reason="BUG-456: device sometimes drops the session",
+    raises=(ConnectionError, TimeoutError),
+)
+def test_device_handshake():
+    ...
+```
+Subclasses match too (`ConnectionResetError` is converted by `raises=ConnectionError`).
+Any other failure, such as an `AssertionError` from a real regression, still fails the run.
 
-### 4. Setup Pre-commit Hooks
-```bash
-# Install pre-commit hooks
-pre-commit install
+### Enable in `pytest.ini` for CI
+```ini
+[pytest]
+addopts =
+    --fail2skip
 ```
 
-```bash
-# Run on all files (optional, for existing codebase)
-pre-commit run --all-files
+### Read the reason from a custom plugin
+```python
+def pytest_runtest_logreport(report):
+    reason = dict(report.user_properties).get("fail2skip_reason")
+    if report.skipped and reason:
+        print(f"{report.nodeid} was converted: {reason}")
 ```
 
-```bash
-# Run on all files excluding specific files (example: main.py) (optional, for existing codebase)
-pre-commit run --files $(git ls-files | grep -v "main.py")
-```
+---
 
-**Automatic Usage:**
-Once installed, pre-commit will automatically run on every `git commit`. If any hook fails:
-- **Fix the issues** and commit again
-- **Skip hooks** (not recommended): `git commit --no-verify`
-
-### 5. Go-Task
-This template uses **Go-Task** to provide a consistent interface for common development commands.
-
-```bash
-# List available tasks
-task --list
-```
-
-Use `task <task-name>` to run predefined workflows such as linting, formatting, testing, or other project utilities.
-
-All tasks are defined in `Taskfile.yml` at the repository root and are intended to standardize local development and CI usage.
+## 🔁 Migrating from pytest-plugins
+This plugin was previously the `fail2skip` feature of `pytest-plugins`. Both register the `--fail2skip` option,
+so don't install them together until you're on a `pytest-plugins` release without `fail2skip`.
+Changes when migrating:
+- Converted tests are now reported as `skipped` instead of `xfailed`.
+- The pytest-plugins report records them as `skipped` (not `failed-skipped`); the reason is available via `user_properties`.
 
 ---
 
@@ -130,15 +137,8 @@ Additions that promote clean, productive, and maintainable development are alway
 
 ---
 
-## 📋 Development Checklist
-When using this template for a new project:
-
-- [ ] Update README.md with project-specific information
-- [ ] Configure environment variables in .env
-- [ ] Update pyproject.toml with project dependencies
-- [ ] Set up GitHub repository secrets for CI/CD
-- [ ] Configure package metadata in setup.py or pyproject.toml
-- [ ] Add project-specific tests
+## 📄 License
+MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
